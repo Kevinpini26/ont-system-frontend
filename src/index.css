@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/*
+ * dark: en mode class-based (et non plus la media query prefers-color-scheme
+ * par défaut de Tailwind) : ceci permet à App.jsx de piloter précisément où
+ * le mode sombre s'applique — synchronisé sur les préférences système partout
+ * dans l'espace applicatif interne, mais désactivé sans exception sur le
+ * portail public (charte graphique : fond clair obligatoire, voir useThemeSync).
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /*
+   * Charte graphique ONT — quatre teintes tirées du logo (antilope devant un
+   * soleil) : bleu dominant, or du soleil, vert et violet en touches. Chaque
+   * teinte est déclinée en échelle 50→900 autour du hex de marque fourni
+   * (positionné au palier 500/600, convention Tailwind) : ce sont des rampes
+   * calculées, pas des nuanciers officiels — à ajuster si une charte graphique
+   * PDF existe. Le rouge n'est PAS repris ici à dessein : il reste réservé aux
+   * actions destructives/erreurs via les teintes Tailwind rose/red par défaut,
+   * pour ne jamais le confondre avec une couleur de marque.
+   */
+
+  /* ont-blue — couleur principale (dominante du logo) */
+  --color-ont-blue-50: #eef4fb;
+  --color-ont-blue-100: #d6e4f5;
+  --color-ont-blue-200: #aec9eb;
+  --color-ont-blue-300: #7fa9de;
+  --color-ont-blue-400: #4c86cb;
+  --color-ont-blue-500: #2e6bb5;
+  --color-ont-blue-600: #1e5fa8;
+  --color-ont-blue-700: #184b85;
+  --color-ont-blue-800: #143c6b;
+  --color-ont-blue-900: #102f54;
+  --color-ont-blue-950: #0b2038;
+
+  /* ont-gold — accent (soleil du logo), mise en avant / statuts "en attente" */
+  --color-ont-gold-50: #fff8eb;
+  --color-ont-gold-100: #feecc7;
+  --color-ont-gold-200: #fdd68a;
+  --color-ont-gold-300: #fbbd52;
+  --color-ont-gold-400: #f8ae33;
+  --color-ont-gold-500: #f5a623;
+  --color-ont-gold-600: #d6890f;
+  --color-ont-gold-700: #b06d0b;
+  --color-ont-gold-800: #8a550c;
+  --color-ont-gold-900: #70450f;
+
+  /* ont-green — statuts positifs ("validé", "clôturé", "présent") */
+  --color-ont-green-50: #f1f9ec;
+  --color-ont-green-100: #dff0d2;
+  --color-ont-green-200: #c0e2a8;
+  --color-ont-green-300: #9dd17c;
+  --color-ont-green-400: #82c55e;
+  --color-ont-green-500: #6fbe44;
+  --color-ont-green-600: #559a32;
+  --color-ont-green-700: #427928;
+  --color-ont-green-800: #365f22;
+  --color-ont-green-900: #2c4c1e;
+
+  /* ont-purple — touche secondaire, à utiliser avec parcimonie */
+  --color-ont-purple-50: #f5f1fa;
+  --color-ont-purple-100: #e7dbf3;
+  --color-ont-purple-200: #cfb7e8;
+  --color-ont-purple-300: #b393da;
+  --color-ont-purple-400: #9f79ce;
+  --color-ont-purple-500: #8b5fbf;
+  --color-ont-purple-600: #714a9e;
+  --color-ont-purple-700: #5a3a7d;
+  --color-ont-purple-800: #482f65;
+  --color-ont-purple-900: #3b2653;
+
+  --font-sans: 'Inter', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-heading: 'Poppins', 'Inter', system-ui, sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-100 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-100;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* Champs de formulaire natifs : mêmes réglages fins (accent color, calendrier
+   sombre) qu'un site géré entièrement par Tailwind ne peut pas exprimer via
+   des classes utilitaires. */
+input,
+select,
+textarea {
+  accent-color: var(--color-ont-blue-600);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-300 dark:bg-slate-700;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+/* Pulsation subtile (opacité/échelle légères) des badges de notification de
+   la sidebar tant que leur valeur est > 0 — attire l'œil sans distraire,
+   voir Sidebar.jsx::BadgeCompteur. */
+@keyframes pulse-badge {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.08);
+  }
+}
+
+.animate-pulse-badge {
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+/* N'imprimer qu'un élément précis (ex. le tableau récapitulatif d'évaluation) :
+   le reste de la page — navigation, boutons, autres cartes — est masqué sans
+   avoir à dupliquer le rendu dans une fenêtre séparée. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .zone-impression,
+  .zone-impression * {
+    visibility: visible;
+  }
+  .zone-impression {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

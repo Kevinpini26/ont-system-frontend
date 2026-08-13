@@ -1,0 +1,285 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AlertTriangle, Clock, GraduationCap, Mail, MailCheck, Users } from 'lucide-react';
+import { getCourriersStatistiquesDirection, listCourriers } from '../api/courrierApi';
+import { getStagiairesAlertes, getStagiairesStatistiques, listStagiaires } from '../../stagiaires/api/stagiairesApi';
+import { STATUT_LABELS } from '../constants';
+import { PageHeader } from '../../../shared/components/ui/PageHeader';
+import { Card, CardBody, CardHeader } from '../../../shared/components/ui/Card';
+import { Badge } from '../../../shared/components/ui/Badge';
+import { StatCard } from '../../../shared/components/ui/StatCard';
+import { PeriodSelector } from '../../../shared/components/ui/PeriodSelector';
+import { SkeletonChart, SkeletonStatCards } from '../../../shared/components/ui/Skeleton';
+import { EmptyState } from '../../../shared/components/ui/EmptyState';
+import { LoadingBlock } from '../../../shared/components/ui/Spinner';
+import { CHART_COLORS } from '../../../shared/chartColors';
+
+const AXIS_TICK = { fill: CHART_COLORS.axisTick, fontSize: 12 };
+const LIEN_VOIR_TOUT = 'text-sm font-medium text-ont-blue-700 hover:underline dark:text-ont-blue-400';
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-md dark:border-slate-700 dark:bg-slate-800">
+      <p className="font-medium text-slate-900 dark:text-slate-100">{label}</p>
+      <p className="text-slate-600 dark:text-slate-300">{payload[0].value}</p>
+    </div>
+  );
+}
+
+function DerniersCourriers({ courriers, chargement }) {
+  if (chargement) return <LoadingBlock />;
+  if (courriers.length === 0) return <EmptyState icon={<Mail size={28} />} title="Aucun courrier pour le moment" />;
+  return (
+    <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+      {courriers.map((c) => (
+        <li key={c.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+          <Link to={`/courriers/${c.id}`} className="min-w-0 flex-1 truncate text-slate-700 hover:text-ont-blue-700 dark:text-slate-300">
+            {c.objet}
+          </Link>
+          <Badge tone="info">{STATUT_LABELS[c.statut]}</Badge>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DerniersStagiaires({ stagiaires, chargement }) {
+  if (chargement) return <LoadingBlock />;
+  if (stagiaires.length === 0) return <EmptyState icon={<GraduationCap size={28} />} title="Aucun stagiaire pour le moment" />;
+  return (
+    <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+      {stagiaires.map((s) => (
+        <li key={s.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+          <Link to={`/stagiaires/${s.id}`} className="min-w-0 flex-1 truncate text-slate-700 hover:text-ont-blue-700 dark:text-slate-300">
+            {s.nom}
+          </Link>
+          <Badge tone="info">{s.statut_label}</Badge>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Chaque alerte mène directement au dossier concerné (pas juste
+ * informative) — voir GET /stagiaires/alertes. Convention de couleur : le
+ * rouge (danger) reste réservé aux cas vraiment critiques (voir la carte
+ * "Courriers non traités > 48h" ci-dessous) ; ces alertes-ci sont "à
+ * surveiller", donc en ont-gold (warning).
+ */
+function ListeAlertes({ items, chargement, vide, rendu }) {
+  if (chargement) return <LoadingBlock />;
+  if (items.length === 0) return <EmptyState title={vide} />;
+  return (
+    <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+      {items.map((item) => (
+        <li key={item.id}>
+          <Link
+            to={`/stagiaires/${item.id}`}
+            className="flex items-center justify-between gap-3 py-2.5 text-sm text-slate-700 hover:text-ont-blue-700 dark:text-slate-300"
+          >
+            {rendu(item)}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Tableau de bord d'une direction d'accueil : ce qu'un agent doit
+ * réellement savoir pour agir (alertes cliquables en premier), puis les
+ * graphiques et un aperçu condensé — les listes complètes vivent sur leurs
+ * propres pages, accessibles depuis la sidebar et les liens "Voir tout".
+ */
+export function DirectionDashboardPage() {
+  const [periode, setPeriode] = useState('30j');
+  const [statsCourrier, setStatsCourrier] = useState(null);
+  const [statsStagiaires, setStatsStagiaires] = useState(null);
+  const [statsChargement, setStatsChargement] = useState(true);
+
+  const [alertes, setAlertes] = useState(null);
+  const [chargementAlertes, setChargementAlertes] = useState(true);
+
+  const [courriers, setCourriers] = useState([]);
+  const [chargementCourriers, setChargementCourriers] = useState(true);
+  const [stagiaires, setStagiaires] = useState([]);
+  const [chargementStagiaires, setChargementStagiaires] = useState(true);
+
+  useEffect(() => {
+    setStatsChargement(true);
+    Promise.all([getCourriersStatistiquesDirection(periode), getStagiairesStatistiques({ periode })])
+      .then(([courrier, stagiaires]) => {
+        setStatsCourrier(courrier);
+        setStatsStagiaires(stagiaires);
+      })
+      .finally(() => setStatsChargement(false));
+  }, [periode]);
+
+  useEffect(() => {
+    setChargementAlertes(true);
+    getStagiairesAlertes()
+      .then(setAlertes)
+      .finally(() => setChargementAlertes(false));
+
+    setChargementCourriers(true);
+    listCourriers()
+      .then(({ data }) => setCourriers([...data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)))
+      .finally(() => setChargementCourriers(false));
+
+    setChargementStagiaires(true);
+    listStagiaires({ page: 1, en_cours: 1 })
+      .then(({ data }) => setStagiaires(data.slice(0, 5)))
+      .finally(() => setChargementStagiaires(false));
+  }, []);
+
+  const evolution = useMemo(() => statsStagiaires?.evolution ?? [], [statsStagiaires]);
+  // Le dashboard ne doit jamais dépendre du volume d'archives accumulé :
+  // exclut les dossiers clôturés de la répartition affichée ici (consultable
+  // en détail sur l'historique dédié, voir HistoriqueStagiairesPage.jsx).
+  const parStatut = useMemo(() => (statsStagiaires?.par_statut ?? []).filter((s) => s.statut !== 'cloture'), [statsStagiaires]);
+
+  return (
+    <div>
+      <PageHeader
+        title="Tableau de bord"
+        description="Vue d'ensemble de votre direction : courrier et stagiaires accueillis."
+        action={<PeriodSelector value={periode} onChange={setPeriode} />}
+      />
+
+      {statsChargement ? (
+        <SkeletonStatCards />
+      ) : (
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="Courriers non traités > 48h"
+            value={statsCourrier?.courriers_recus_non_traites_48h ?? '—'}
+            icon={<Clock size={22} />}
+            tone={statsCourrier?.courriers_recus_non_traites_48h > 0 ? 'danger' : 'success'}
+          />
+          <StatCard
+            label="Courriers envoyés en cours"
+            value={statsCourrier?.courriers_emis_en_cours ?? '—'}
+            icon={<MailCheck size={22} />}
+            tone="neutral"
+          />
+          <StatCard
+            label="Stagiaires affectés"
+            value={statsStagiaires?.stagiaires_affectes ?? '—'}
+            icon={<Users size={22} />}
+            tone="primary"
+          />
+          <StatCard
+            label="Stages échéance ≤ 10 j"
+            value={statsStagiaires?.echeance_10_jours ?? '—'}
+            icon={<AlertTriangle size={22} />}
+            tone={statsStagiaires?.echeance_10_jours > 0 ? 'accent' : 'success'}
+          />
+        </div>
+      )}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Évaluations en attente d'ouverture par la DFP" />
+          <CardBody>
+            <ListeAlertes
+              items={alertes?.evaluation_attente_ouverture ?? []}
+              chargement={chargementAlertes}
+              vide="Aucune évaluation en attente"
+              rendu={(s) => (
+                <>
+                  <span className="min-w-0 flex-1 truncate">{s.nom}</span>
+                  <Badge tone="warning">{s.statut_label}</Badge>
+                </>
+              )}
+            />
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="Stages se terminant dans les 10 jours" />
+          <CardBody>
+            <ListeAlertes
+              items={alertes?.echeance_10_jours ?? []}
+              chargement={chargementAlertes}
+              vide="Aucune échéance proche"
+              rendu={(s) => (
+                <>
+                  <span className="min-w-0 flex-1 truncate">{s.nom}</span>
+                  <Badge tone="warning">{s.jours_restants} j</Badge>
+                </>
+              )}
+            />
+          </CardBody>
+        </Card>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {statsChargement ? (
+          <>
+            <SkeletonChart />
+            <SkeletonChart />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader title="Évolution des dossiers de stagiaires" description="Sur la période sélectionnée" />
+              <CardBody>
+                {evolution.length === 0 ? (
+                  <EmptyState title="Aucun dossier sur cette période" />
+                ) : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={evolution} margin={{ left: -20, right: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
+                      <XAxis dataKey="periode" tick={{ ...AXIS_TICK, fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ stroke: CHART_COLORS.ontBlue600, strokeWidth: 1 }} />
+                      <Line type="monotone" dataKey="total" stroke={CHART_COLORS.ontBlue600} strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader title="Répartition par statut" description="Stagiaires de votre direction" />
+              <CardBody>
+                {parStatut.every((s) => s.total === 0) ? (
+                  <EmptyState title="Aucun stagiaire pour le moment" />
+                ) : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={parStatut} margin={{ left: -20, right: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
+                      <XAxis dataKey="label" tick={{ ...AXIS_TICK, fontSize: 10 }} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
+                      <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(30,95,168,0.08)' }} />
+                      <Bar dataKey="total" fill={CHART_COLORS.ontGold500} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardBody>
+            </Card>
+          </>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Derniers courriers" action={<Link to="/direction/courrier" className={LIEN_VOIR_TOUT}>Voir tout →</Link>} />
+          <CardBody>
+            <DerniersCourriers courriers={courriers} chargement={chargementCourriers} />
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="Derniers stagiaires" action={<Link to="/direction/stagiaires" className={LIEN_VOIR_TOUT}>Voir tout →</Link>} />
+          <CardBody>
+            <DerniersStagiaires stagiaires={stagiaires} chargement={chargementStagiaires} />
+          </CardBody>
+        </Card>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,566 @@
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { Eye } from 'lucide-react';
+import {
+  accuserReception,
+  enregistrer,
+  getCourrier,
+  rendreAvis,
+  signer,
+  soumettreProjetReponse,
+  transmettreAvisDg,
+  transmettreProtocole,
+  validerAvantDiffusion,
+  validerRelecture,
+} from '../api/courrierApi';
+import { listAgentsCircuitCourrier } from '../../kernel/api/agentsApi';
+import { getDgDisponibilite } from '../../kernel/api/dgDisponibiliteApi';
+import { useAuthStore } from '../../kernel/store/authStore';
+import { StatutTimeline } from '../components/StatutTimeline';
+import { BordereauxTimeline } from '../components/BordereauxTimeline';
+import { AnnotationsPanel } from '../components/AnnotationsPanel';
+import { TipTapEditor } from '../components/TipTapEditor';
+import { ACTION_PAR_POSTE, TYPE_LABELS, CLASSIFICATION_LABELS } from '../constants';
+import { PageHeader } from '../../../shared/components/ui/PageHeader';
+import { Card, CardBody, CardHeader } from '../../../shared/components/ui/Card';
+import { Button } from '../../../shared/components/ui/Button';
+import { Field, inputClass } from '../../../shared/components/ui/Field';
+import { Alert } from '../../../shared/components/ui/Alert';
+import { Badge } from '../../../shared/components/ui/Badge';
+import { LoadingBlock } from '../../../shared/components/ui/Spinner';
+import { DocumentPreviewModal } from '../../../shared/components/DocumentPreviewModal';
+
+export function CourrierDetailPage() {
+  const { id } = useParams();
+  const user = useAuthStore((s) => s.user);
+
+  const [courrier, setCourrier] = useState(null);
+  const [erreur, setErreur] = useState(null);
+  const [chargement, setChargement] = useState(true);
+  const [apercu, setApercu] = useState(null);
+
+  async function charger() {
+    setChargement(true);
+    try {
+      setCourrier(await getCourrier(id));
+    } finally {
+      setChargement(false);
+    }
+  }
+
+  useEffect(() => {
+    charger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  async function executer(action) {
+    setErreur(null);
+    try {
+      const misAJour = await action();
+      setCourrier(misAJour);
+    } catch (err) {
+      setErreur(err.response?.data?.message ?? "Action impossible.");
+    }
+  }
+
+  if (chargement) return <LoadingBlock />;
+  if (!courrier) return <Alert tone="error">Courrier introuvable.</Alert>;
+
+  return (
+    <div>
+      <PageHeader
+        title={courrier.objet}
+        description={`${courrier.numero_accuse_reception}${
+          courrier.numero_enregistrement ? ` · Enregistré sous ${courrier.numero_enregistrement}` : ''
+        } · ${TYPE_LABELS[courrier.type]}`}
+        action={
+          ['signe', 'enregistre'].includes(courrier.statut) && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                setApercu({
+                  title: 'Courrier signé',
+                  url: `/courriers/${courrier.id}/pdf`,
+                  downloadFilename: `courrier-${courrier.numero_accuse_reception}.pdf`,
+                })
+              }
+            >
+              <Eye size={18} />
+              Voir le PDF signé
+            </Button>
+          )
+        }
+      />
+
+      {courrier.initie_par_dg && (
+        <div className="mb-4">
+          <Badge tone="info">Courrier initié par la DG</Badge>
+        </div>
+      )}
+
+      <StatutTimeline
+        statut={courrier.statut}
+        necessiteAvisDg={courrier.necessite_avis_dg}
+        initieParDg={courrier.initie_par_dg}
+        validationDgRequise={courrier.validation_dg_requise}
+      />
+
+      <div className="mb-6">
+        <BordereauxTimeline transitions={courrier.transitions} />
+      </div>
+
+      {erreur && <Alert tone="error" className="mb-6">{erreur}</Alert>}
+
+      <div className="mb-6 space-y-6">
+        <Card>
+          <CardHeader title="Informations" />
+          <CardBody className="space-y-3 text-sm">
+            <p className="text-slate-700 dark:text-slate-300">
+              <span className="font-medium text-slate-900 dark:text-slate-100">Origine : </span>
+              {courrier.direction_origine?.nom ?? '—'}
+              <br />
+              <span className="font-medium text-slate-900 dark:text-slate-100">Destination : </span>
+              {courrier.direction_destination?.nom ?? 'Direction Générale'}
+            </p>
+            {courrier.avis_dg && (
+              <p className="text-slate-700 dark:text-slate-300">
+                <span className="font-medium text-slate-900 dark:text-slate-100">Avis DG : </span>
+                {courrier.avis_dg}
+                {courrier.avis_dg_rendu_par && ` — rendu par ${courrier.avis_dg_rendu_par}`}
+                {courrier.avis_dg_rendu_en_interim && (
+                  <Badge tone="warning" className="ml-2">
+                    Traité par le DGA en intérim de la DG
+                  </Badge>
+                )}
+              </p>
+            )}
+            {courrier.piece_jointe_disponible && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  setApercu({
+                    title: 'Pièce jointe',
+                    url: `/courriers/${courrier.id}/piece-jointe`,
+                    downloadFilename: `piece-jointe-${courrier.numero_accuse_reception}`,
+                  })
+                }
+              >
+                <Eye size={16} />
+                Pièce jointe
+              </Button>
+            )}
+            {courrier.candidat && courrier.anonymise_at ? (
+              <div className="rounded-lg bg-slate-100 p-3 text-sm dark:bg-slate-800">
+                <p className="font-medium text-slate-700 dark:text-slate-300">Candidature non retenue — dossier anonymisé</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Les données personnelles du candidat ont été supprimées conformément à la politique de conservation
+                  (12 mois après l'avis défavorable de la Direction Générale).
+                </p>
+              </div>
+            ) : (
+              courrier.candidat && (
+                <div className="rounded-lg bg-ont-gold-50 p-3 text-sm dark:bg-ont-gold-900/20">
+                  <p className="mb-1 font-medium text-ont-gold-800 dark:text-ont-gold-300">
+                    Candidat (demande de stage{courrier.candidat.type_stage_label ? ` — ${courrier.candidat.type_stage_label}` : ''})
+                  </p>
+                  <p className="text-slate-700 dark:text-slate-300">
+                    {courrier.candidat.nom} — {courrier.candidat.contact}
+                    <br />
+                    {courrier.candidat.etablissement}
+                    {courrier.candidat.periode_souhaitee_debut && (
+                      <>
+                        <br />
+                        Période souhaitée par le candidat (indicative) : {courrier.candidat.periode_souhaitee_debut} →{' '}
+                        {courrier.candidat.periode_souhaitee_fin}
+                      </>
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {courrier.candidat.lettre_stage_disponible && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setApercu({
+                            title: "Lettre de stage de l'université",
+                            url: `/courriers/${courrier.id}/lettre-stage`,
+                            downloadFilename: `lettre-stage-${courrier.numero_accuse_reception}`,
+                          })
+                        }
+                      >
+                        <Eye size={16} />
+                        Lettre de stage de l'université
+                      </Button>
+                    )}
+                    {courrier.candidat.lettre_demande_disponible && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setApercu({
+                            title: 'Lettre de demande de stage',
+                            url: `/courriers/${courrier.id}/pieces/lettre-demande`,
+                            downloadFilename: `lettre-demande-${courrier.numero_accuse_reception}`,
+                          })
+                        }
+                      >
+                        <Eye size={16} />
+                        Lettre de demande de stage
+                      </Button>
+                    )}
+                    {courrier.candidat.cv_disponible && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setApercu({
+                            title: 'CV du candidat',
+                            url: `/courriers/${courrier.id}/pieces/cv`,
+                            downloadFilename: `cv-${courrier.numero_accuse_reception}`,
+                          })
+                        }
+                      >
+                        <Eye size={16} />
+                        CV du candidat
+                      </Button>
+                    )}
+                    {courrier.candidat.diplome_etat_disponible && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setApercu({
+                            title: "Diplôme d'État",
+                            url: `/courriers/${courrier.id}/pieces/diplome-etat`,
+                            downloadFilename: `diplome-etat-${courrier.numero_accuse_reception}`,
+                          })
+                        }
+                      >
+                        <Eye size={16} />
+                        Diplôme d'État
+                      </Button>
+                    )}
+                    {courrier.candidat.dernier_diplome_disponible && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setApercu({
+                            title: 'Dernier diplôme obtenu',
+                            url: `/courriers/${courrier.id}/pieces/dernier-diplome`,
+                            downloadFilename: `dernier-diplome-${courrier.numero_accuse_reception}`,
+                          })
+                        }
+                      >
+                        <Eye size={16} />
+                        Dernier diplôme obtenu
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )
+            )}
+            {courrier.expediteur_externe_nom && (
+              <div className="rounded-lg bg-ont-blue-50 p-3 text-sm dark:bg-ont-blue-900/20">
+                <p className="mb-1 font-medium text-ont-blue-800 dark:text-ont-blue-300">Expéditeur externe</p>
+                <p className="text-slate-700 dark:text-slate-300">
+                  {courrier.expediteur_externe_nom}
+                  {courrier.expediteur_externe_email && <> — {courrier.expediteur_externe_email}</>}
+                  {courrier.expediteur_externe_telephone && <> — {courrier.expediteur_externe_telephone}</>}
+                </p>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
+        {courrier.contenu && (
+          <Card>
+            <CardHeader title="Contenu du courrier" />
+            <CardBody>
+              <TipTapEditor content={courrier.contenu} editable={false} />
+            </CardBody>
+          </Card>
+        )}
+
+        <ActionsCourrier courrier={courrier} user={user} executer={executer} />
+
+        {courrier.projet_reponse_contenu && (
+          <Card>
+            <CardHeader title="Projet de réponse" />
+            <CardBody>
+              <TipTapEditor content={courrier.projet_reponse_contenu} editable={false} />
+            </CardBody>
+          </Card>
+        )}
+      </div>
+
+      <AnnotationsPanel courrierId={courrier.id} />
+
+      <DocumentPreviewModal
+        open={apercu !== null}
+        onClose={() => setApercu(null)}
+        title={apercu?.title ?? ''}
+        url={apercu?.url}
+        downloadFilename={apercu?.downloadFilename}
+      />
+    </div>
+  );
+}
+
+function ActionsCourrier({ courrier, user, executer }) {
+  const [agents, setAgents] = useState([]);
+  const [relecteurId, setRelecteurId] = useState('');
+  const [projetContenu, setProjetContenu] = useState(courrier.projet_reponse_contenu ?? '');
+  const [avisDg, setAvisDg] = useState('favorable');
+  const [avisCommentaire, setAvisCommentaire] = useState('');
+  const [relectureCommentaire, setRelectureCommentaire] = useState('');
+  const [noteTechnique, setNoteTechnique] = useState('');
+  const [accuseReceptionPartenaire, setAccuseReceptionPartenaire] = useState('');
+  const [envoiEnCours, setEnvoiEnCours] = useState(false);
+  const [dgIndisponible, setDgIndisponible] = useState(false);
+
+  useEffect(() => {
+    if (courrier.statut === 'projet_reponse_en_cours' && user.poste === 'secretariat_1') {
+      listAgentsCircuitCourrier().then(setAgents);
+    }
+  }, [courrier.statut, user.poste]);
+
+  useEffect(() => {
+    if (courrier.statut === 'en_attente_avis_dg' && user.poste === 'dga') {
+      getDgDisponibilite().then((disponible) => setDgIndisponible(!disponible));
+    }
+  }, [courrier.statut, user.poste]);
+
+  const estRelecteurDesigne = courrier.relecteur?.id === user.id;
+
+  // Le classement interne/externe n'est jamais un choix libre de l'agent —
+  // déterminé côté serveur par la nature du courrier (voir
+  // Courrier::classificationAttendue()) et rejeté s'il ne correspond pas.
+  // Calculé ici uniquement pour affichage et pour l'envoyer déjà correct.
+  const classification = courrier.expediteur_externe_nom || courrier.candidat?.nom ? 'externe' : 'interne';
+
+  async function executerEtSuivre(action) {
+    setEnvoiEnCours(true);
+    try {
+      await executer(action);
+    } finally {
+      setEnvoiEnCours(false);
+    }
+  }
+
+  // Tant que le bordereau qui a amené ce dossier à son statut actuel n'est
+  // pas acquitté, aucune des actions ci-dessous n'est accessible — voir
+  // CourrierCircuitService::assertDechargeDonnee(). en_relecture est un cas
+  // particulier : le destinataire est le relecteur désigné précisément,
+  // jamais un poste (contrairement à ACTION_PAR_POSTE, qui liste aussi la
+  // DG pour ce statut — pour la signature, une fois la relecture validée,
+  // pas pour la décharge elle-même).
+  if (courrier.en_transit) {
+    // reception a une entrée non-tableau ({ statutDepart: null }, jamais
+    // habilitée à une transition) — Array.isArray exclut ce cas plutôt que
+    // de planter sur .some().
+    const actionsDuPoste = ACTION_PAR_POSTE[user.poste];
+    const eligiblePourDecharge =
+      courrier.statut === 'en_relecture'
+        ? estRelecteurDesigne
+        : Array.isArray(actionsDuPoste) && actionsDuPoste.some((a) => a.statutDepart === courrier.statut);
+
+    if (eligiblePourDecharge) {
+      return (
+        <Card>
+          <CardHeader title="Accuser réception" description="Ce dossier vous a été transmis et attend votre décharge avant que vous puissiez agir dessus." />
+          <CardBody>
+            <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => accuserReception(courrier.id))}>
+              Accuser réception
+            </Button>
+          </CardBody>
+        </Card>
+      );
+    }
+
+    return (
+      <Card>
+        <CardBody>
+          <Alert tone="warning">Ce dossier est en transit — il est en attente de décharge par son destinataire.</Alert>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'recu' && courrier.necessite_avis_dg && user.poste === 'protocole') {
+    return (
+      <Card>
+        <CardBody>
+          <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => transmettreProtocole(courrier.id))}>
+            Transmettre au protocole
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'au_protocole' && user.poste === 'protocole') {
+    return (
+      <Card>
+        <CardBody>
+          <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => transmettreAvisDg(courrier.id))}>
+            Transmettre à la DG pour avis
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  // La DG rend l'avis normalement ; la DGA ne le peut que si la DG est
+  // marquée indisponible (intérim, voir GET /dg-disponibilite) — sinon la
+  // DGA ne voit aucune action ici, cohérent avec le blocage 422 côté serveur.
+  if (courrier.statut === 'en_attente_avis_dg' && (user.poste === 'dg' || (user.poste === 'dga' && dgIndisponible))) {
+    return (
+      <Card>
+        <CardHeader title="Rendre un avis" />
+        <CardBody className="space-y-4">
+          {user.poste === 'dga' && (
+            <Alert tone="info">Vous intervenez en intérim de la DG, actuellement marquée indisponible.</Alert>
+          )}
+          <Field label="Avis" htmlFor="avis">
+            <select id="avis" className={inputClass} value={avisDg} onChange={(e) => setAvisDg(e.target.value)}>
+              <option value="favorable">Favorable</option>
+              <option value="defavorable">Défavorable</option>
+              <option value="reserve">Réservé</option>
+            </select>
+          </Field>
+          <Field label="Commentaire" htmlFor="avisCommentaire">
+            <textarea id="avisCommentaire" rows={3} className={inputClass} value={avisCommentaire} onChange={(e) => setAvisCommentaire(e.target.value)} />
+          </Field>
+          <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => rendreAvis(courrier.id, avisDg, avisCommentaire))}>
+            Valider l'avis
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'en_attente_validation_dg' && user.poste === 'dg') {
+    return (
+      <Card>
+        <CardHeader title="Valider avant diffusion" description="Ce courrier a été initié en votre nom et attend votre aval avant de partir en relecture." />
+        <CardBody className="space-y-4">
+          <TipTapEditor content={courrier.projet_reponse_contenu} editable={false} />
+          <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => validerAvantDiffusion(courrier.id))}>
+            Valider avant diffusion
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'projet_reponse_en_cours' && user.poste === 'secretariat_1') {
+    return (
+      <Card>
+        <CardHeader title="Rédiger le projet de réponse" />
+        <CardBody className="space-y-4">
+          <TipTapEditor content={projetContenu} onChange={setProjetContenu} />
+          <Field label="Relecteur désigné" htmlFor="relecteur">
+            <select id="relecteur" className={inputClass} value={relecteurId} onChange={(e) => setRelecteurId(e.target.value)}>
+              <option value="" disabled>
+                Choisir un relecteur
+              </option>
+              {agents
+                .filter((a) => a.id !== user.id)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.poste_label})
+                  </option>
+                ))}
+            </select>
+          </Field>
+          <Button
+            disabled={!relecteurId || envoiEnCours}
+            onClick={() => executerEtSuivre(() => soumettreProjetReponse(courrier.id, projetContenu, Number(relecteurId)))}
+          >
+            Soumettre à la relecture
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'en_relecture' && estRelecteurDesigne && !courrier.relecture_validee_at) {
+    return (
+      <Card>
+        <CardHeader title="Validation de la relecture" />
+        <CardBody className="space-y-4">
+          <Field label="Commentaire (optionnel)" htmlFor="relectureCommentaire">
+            <textarea
+              id="relectureCommentaire"
+              rows={3}
+              className={inputClass}
+              value={relectureCommentaire}
+              onChange={(e) => setRelectureCommentaire(e.target.value)}
+            />
+          </Field>
+          <Button disabled={envoiEnCours} onClick={() => executerEtSuivre(() => validerRelecture(courrier.id, relectureCommentaire))}>
+            Valider la relecture
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (courrier.statut === 'en_relecture' && user.poste === 'dg') {
+    return (
+      <Card>
+        <CardBody className="space-y-4">
+          {!courrier.relecture_validee_at && (
+            <Alert tone="error">La relecture n'a pas encore été validée par le relecteur désigné : la signature sera refusée.</Alert>
+          )}
+          <Button variant="gold" disabled={envoiEnCours} onClick={() => executerEtSuivre(() => signer(courrier.id))}>
+            Signer
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  const attendEnregistrementDirect = courrier.statut === 'recu' && !courrier.necessite_avis_dg;
+
+  if ((courrier.statut === 'signe' || attendEnregistrementDirect) && user.poste === 'secretariat_2') {
+    return (
+      <Card>
+        <CardHeader
+          title="Enregistrement final"
+          description={attendEnregistrementDirect ? 'Circuit court — enregistrement direct, sans avis DG.' : undefined}
+        />
+        <CardBody className="space-y-4">
+          <Field label="Classification" hint="Déterminée automatiquement d'après la nature du courrier — non modifiable.">
+            <Badge tone={classification === 'externe' ? 'warning' : 'info'}>{CLASSIFICATION_LABELS[classification]}</Badge>
+          </Field>
+          {classification === 'interne' ? (
+            <Field label="Note technique" htmlFor="noteTechnique">
+              <textarea id="noteTechnique" rows={3} className={inputClass} value={noteTechnique} onChange={(e) => setNoteTechnique(e.target.value)} />
+            </Field>
+          ) : (
+            <Field label="Accusé de réception du partenaire" htmlFor="accuseReceptionPartenaire">
+              <input
+                id="accuseReceptionPartenaire"
+                className={inputClass}
+                value={accuseReceptionPartenaire}
+                onChange={(e) => setAccuseReceptionPartenaire(e.target.value)}
+              />
+            </Field>
+          )}
+          <Button
+            disabled={envoiEnCours}
+            onClick={() => executerEtSuivre(() => enregistrer(courrier.id, classification, noteTechnique, accuseReceptionPartenaire))}
+          >
+            Enregistrer
+          </Button>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  return null;
+}

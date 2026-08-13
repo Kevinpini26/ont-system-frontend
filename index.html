@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Portail de gestion administrative de l'Office National du Tourisme (RDC) : dépôt de demande de stage, dépôt de courrier et suivi de dossier en ligne."
+    />
+    <title>Portail de gestion administrative — Office National du Tourisme RDC</title>
+    <script>
+      // Applique la classe .dark avant le premier rendu React (évite un flash de
+      // thème sombre) — sauf sur le portail public, qui reste clair par charte
+      // graphique quel que soit le thème système. Garder cette liste synchronisée
+      // avec PUBLIC_LIGHT_PATHS dans src/App.jsx.
+      (function () {
+        var portailPublic = ['/', '/a-propos', '/services', '/demande-de-stage', '/depot-courrier-externe', '/suivi-dossier'];
+        if (portailPublic.indexOf(window.location.pathname) === -1 && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
